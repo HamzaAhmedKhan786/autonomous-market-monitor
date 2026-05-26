@@ -9,7 +9,7 @@ This project demonstrates the hands-on orchestration of large language models (L
 ## 🚀 Overview & Architecture
 
 Instead of relying on manual searching or brittle scraping tools, this project establishes a reliable, decoupled system that handles data extraction, AI processing, structured schema enforcement, and multi-channel alerting.
-
+```text
 [Trigger: RSS Feed / Webhook / Google Sheet]
 │
 ▼
@@ -28,6 +28,7 @@ Instead of relying on manual searching or brittle scraping tools, this project e
 [Action 1: Log to Airtable]     [Action 2: Alert Slack Team]
 (Structured Data Ledger)        (If Actionable is TRUE)
 
+```
 
 ### Key Highlights Evaluated by Hiring Managers:
 - **No-Fluff LLM Integration:** Uses Claude to return deterministic, structural data payloads (`JSON`) instead of conversational text.
