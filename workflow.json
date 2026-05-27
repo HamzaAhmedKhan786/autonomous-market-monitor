@@ -1,0 +1,289 @@
+{
+  "name": "Autonomous Market Monitor",
+  "nodes": [
+    {
+      "//": "========================================================",
+      "//_comment_1": "WEBHOOK TRIGGER NODE",
+      "//_comment_2": "Receives incoming market intelligence data",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "market-data-trigger",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [0, 200],
+      "id": "webhook-trigger-node",
+      "name": "Webhook Trigger"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "CLEAN PAYLOAD NODE",
+      "//_comment_2": "Removes HTML, trims whitespace, truncates long text",
+      "//_comment_3": "Creates optimized_payload for AI analysis",
+      "//_comment_4": "========================================================",
+
+      "parameters": {
+        "jsCode": "// ====================================================\n// CLEAN & OPTIMIZE INCOMING MARKET DATA\n// ====================================================\n\nfor (const item of $input.all()) {\n\n  // Extract raw text from possible fields\n  let rawText = item.json.content || item.json.body || item.json.text || '';\n\n  // Remove HTML tags\n  let cleanedText = rawText.replace(/<[^>]*>/g, ' ');\n\n  // Normalize whitespace\n  cleanedText = cleanedText.replace(/\\s+/g, ' ').trim();\n\n  // Truncate excessively large payloads\n  if (cleanedText.length > 6000) {\n    cleanedText = cleanedText.substring(0, 6000) + ' ... [Truncated]';\n  }\n\n  // Store optimized payload\n  item.json.optimized_payload = cleanedText;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 200],
+      "id": "js-clean-payload-node",
+      "name": "Clean Payload"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "CLAUDE AI AGENT NODE",
+      "//_comment_2": "Runs competitor intelligence analysis",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.advancedAiAgent",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "id": "ai-agent-node",
+      "name": "Claude AI Agent"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "ANTHROPIC MODEL NODE",
+      "//_comment_2": "Uses Claude Sonnet for structured JSON analysis",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "model": "claude-3-5-sonnet-latest",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [420, 420],
+      "id": "anthropic-model-node",
+      "name": "Anthropic Chat Model"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "STRICT JSON PROMPT TEMPLATE",
+      "//_comment_2": "Forces Claude to return ONLY valid JSON",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "template": "You are a specialized business intelligence agent.\n\nAnalyze the provided market intelligence text.\n\nIMPORTANT RULES:\n- Output ONLY valid raw JSON\n- No markdown\n- No explanations\n- No commentary\n- No code fences\n- Ensure valid JSON syntax\n\nText:\n{{ $json.optimized_payload }}\n\nRequired JSON Schema:\n{\n  \"competitor_name\": \"string\",\n  \"impact_level\": \"High\" | \"Medium\" | \"Low\",\n  \"summary_one_sentence\": \"string\",\n  \"action_required\": true | false,\n  \"recommended_response\": \"string\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [580, 420],
+      "id": "prompt-template-node",
+      "name": "Strict JSON Prompt"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "VALIDATE LLM JSON NODE",
+      "//_comment_2": "Cleans AI output and safely parses JSON",
+      "//_comment_3": "Prevents workflow crashes on malformed responses",
+      "//_comment_4": "========================================================",
+
+      "parameters": {
+        "jsCode": "// ====================================================\n// VALIDATE & PARSE AI JSON RESPONSE\n// ====================================================\n\nfor (const item of $input.all()) {\n\n  // Get raw AI output\n  let rawLlmOutput =\n    item.json.output ||\n    item.json.text ||\n    item.json.response ||\n    '';\n\n  let parsedData = {};\n\n  try {\n\n    // Remove markdown code blocks\n    rawLlmOutput = rawLlmOutput\n      .replace(/```json/g, '')\n      .replace(/```/g, '')\n      .trim();\n\n    // Remove accidental Google artifacts\n    rawLlmOutput = rawLlmOutput.replace(\n      /http:\\/\\/googleusercontent\\.com\\/immersive_entry_chip\\/0\\S*/g,\n      ''\n    );\n\n    // Parse JSON safely\n    parsedData = JSON.parse(rawLlmOutput);\n\n  } catch (error) {\n\n    // Prevent workflow failure\n    item.json.error = 'Failed to parse LLM output as JSON';\n\n    item.json.rawLlmOutput = rawLlmOutput;\n\n    // Safe fallback response\n    parsedData = {\n      competitor_name: 'Unknown',\n      impact_level: 'Low',\n      summary_one_sentence: 'AI parsing failure occurred.',\n      action_required: false,\n      recommended_response: 'Manual review required.'\n    };\n  }\n\n  // Store validated output\n  item.json.output = parsedData;\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 200],
+      "id": "js-validate-json-node",
+      "name": "Validate LLM JSON"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "IF ACTION REQUIRED NODE",
+      "//_comment_2": "Checks if AI recommends escalation",
+      "//_comment_3": "TRUE = Send alerts + log data",
+      "//_comment_4": "FALSE = Ignore",
+      "//_comment_5": "========================================================",
+
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.output.action_required }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [960, 200],
+      "id": "if-actionable-node",
+      "name": "If Action Required"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "AIRTABLE LOGGING NODE",
+      "//_comment_2": "Stores competitor intelligence in Airtable",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "operation": "append",
+        "application": {
+          "__rl": true,
+          "value": "external-airtable-app-id",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "market_logs",
+          "mode": "id"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Competitor": "={{ $json.output?.competitor_name || 'Unknown' }}",
+            "Impact": "={{ $json.output?.impact_level || 'Low' }}",
+            "Summary": "={{ $json.output?.summary_one_sentence || 'No summary available' }}"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1220, 100],
+      "id": "airtable-node",
+      "name": "Log to Airtable Ledger"
+    },
+
+    {
+      "//": "========================================================",
+      "//_comment_1": "SLACK ALERT NODE",
+      "//_comment_2": "Sends high-priority competitor alerts",
+      "//_comment_3": "========================================================",
+
+      "parameters": {
+        "authentication": "webhook",
+        "select": "channel",
+        "text": "🚨 *High Priority Competitor Activity Alert* 🚨\n\n*Competitor:* {{ $json.output.competitor_name }}\n*Impact Level:* `{{ $json.output.impact_level }}`\n*Summary:* {{ $json.output.summary_one_sentence }}\n\n*Recommended Action:* {{ $json.output.recommended_response }}"
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1220, 300],
+      "id": "slack-node",
+      "name": "Alert Slack Channel"
+    }
+  ],
+
+  "connections": {
+
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Clean Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "Clean Payload": {
+      "main": [
+        [
+          {
+            "node": "Claude AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Claude AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "Strict JSON Prompt": {
+      "ai_prompt": [
+        [
+          {
+            "node": "Claude AI Agent",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "Claude AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Validate LLM JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "Validate LLM JSON": {
+      "main": [
+        [
+          {
+            "node": "If Action Required",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+
+    "If Action Required": {
+      "main": [
+        [
+          {
+            "node": "Log to Airtable Ledger",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Slack Channel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+
+  "settings": {},
+
+  "id": "market-monitor-workflow-id",
+
+  "meta": {
+    "templateId": "autonomous-market-monitor-v2"
+  },
+
+  "active": false,
+
+  "pinData": {}
+}

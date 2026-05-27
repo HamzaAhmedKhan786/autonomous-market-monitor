@@ -1,0 +1,12 @@
+# Node logs
+logs
+*.log
+npm-debug.log*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Local n8n development environments
+.env
+local_data/
